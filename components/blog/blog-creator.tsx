@@ -146,7 +146,7 @@ export function BlogCreator({ userId }: { userId: string }) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ titleId: selectedTitleIds[0] }),
+        body: JSON.stringify({ title_id: selectedTitleIds[0] }),
       })
 
       if (!firstResponse.ok) {
@@ -176,7 +176,7 @@ export function BlogCreator({ userId }: { userId: string }) {
                 headers: {
                   "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ titleId }),
+                body: JSON.stringify({ title_id: titleId }),
               })
               if (response.ok) {
                 const data = await response.json()

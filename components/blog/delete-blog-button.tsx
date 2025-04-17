@@ -1,7 +1,5 @@
 "use client"
 
-import type React from "react"
-
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import {
@@ -18,6 +16,21 @@ import {
 import { useToast } from "@/components/ui/use-toast"
 import { useSupabase } from "@/components/supabase-provider"
 import { Loader2 } from "lucide-react"
+import { redis, CACHE_KEYS } from "@/lib/redis"
+
+// Helper function to clear all paginated cache
+async function clearUserPostsCache(userId: string) {
+  try {
+    // Get all keys matching the pattern
+    const keys = await redis.keys(`${CACHE_KEYS.USER_POSTS(userId)}*`)
+    if (keys.length > 0) {
+      // Delete all matching keys
+      await Promise.all(keys.map(key => redis.del(key)))
+    }
+  } catch (error) {
+    console.error("Error clearing cache:", error)
+  }
+}
 
 export function DeleteBlogButton({
   postId,
@@ -36,28 +49,86 @@ export function DeleteBlogButton({
     setIsLoading(true)
 
     try {
-      // Delete the post
-      const { error } = await supabase.from("posts").delete().eq("id", postId)
+      // First, get the post details to find the associated title_id
+      const { data: post, error: fetchError } = await supabase
+        .from("posts")
+        .select("title_id")
+        .eq("id", postId)
+        .single()
 
-      if (error) {
-        throw new Error(error.message)
+      if (fetchError) {
+        throw new Error(fetchError.message)
       }
+
+      // Get the current user
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        throw new Error("User not authenticated")
+      }
+
+      // Delete the post
+      const { error: deleteError } = await supabase
+        .from("posts")
+        .delete()
+        .eq("id", postId)
+
+      if (deleteError) {
+        throw new Error(deleteError.message)
+      }
+
+      // Update the title to mark it as unused
+      if (post?.title_id) {
+        const { error: titleError } = await supabase
+          .from("titles")
+          .update({ is_used: false })
+          .eq("id", post.title_id)
+
+        if (titleError) {
+          console.error("Error updating title:", titleError)
+        }
+      }
+
+      // Get current posts_count and decrement it
+      const { data: userData, error: userFetchError } = await supabase
+        .from("users")
+        .select("posts_count")
+        .eq("id", user.id)
+        .single()
+
+      if (userFetchError) {
+        console.error("Error fetching user data:", userFetchError)
+      } else {
+        const currentCount = userData?.posts_count || 0
+        if (currentCount > 0) {
+          const { error: updateError } = await supabase
+            .from("users")
+            .update({ posts_count: currentCount - 1 })
+            .eq("id", user.id)
+
+          if (updateError) {
+            console.error("Error updating user posts count:", updateError)
+          }
+        }
+      }
+
+      // Clear all paginated cache for this user
+      await clearUserPostsCache(user.id)
 
       toast({
         title: "Success",
-        description: "Blog post deleted successfully",
+        description: "Blog deleted successfully",
       })
 
-      setIsOpen(false)
       router.refresh()
     } catch (error) {
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to delete blog post",
+        description: error instanceof Error ? error.message : "Failed to delete blog",
         variant: "destructive",
       })
     } finally {
       setIsLoading(false)
+      setIsOpen(false)
     }
   }
 
@@ -88,4 +159,7 @@ export function DeleteBlogButton({
     </AlertDialog>
   )
 }
+
+// For compatibility with both default and named imports
+export default DeleteBlogButton
 

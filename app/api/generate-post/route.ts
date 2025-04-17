@@ -1,28 +1,38 @@
 import { NextResponse } from "next/server"
 import { createServerClient } from "@/lib/supabase-server"
 import OpenAI from "openai"
+import { redis, CACHE_KEYS } from "@/lib/redis"
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
+// Helper function to clear all paginated cache
+async function clearUserPostsCache(userId: string) {
+  try {
+    // Get all keys matching the pattern
+    const keys = await redis.keys(`${CACHE_KEYS.USER_POSTS(userId)}*`)
+    if (keys.length > 0) {
+      // Delete all matching keys
+      await Promise.all(keys.map(key => redis.del(key)))
+    }
+  } catch (error) {
+    console.error("Error clearing cache:", error)
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const supabase = createServerClient()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // Get user session
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-
-    if (!session) {
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Get request body
-    const { titleId } = await request.json()
+    const { title_id } = await request.json()
 
-    if (!titleId) {
+    if (!title_id) {
       return NextResponse.json({ error: "Title ID is required" }, { status: 400 })
     }
 
@@ -30,8 +40,8 @@ export async function POST(request: Request) {
     const { data: title, error: titleError } = await supabase
       .from("titles")
       .select("*")
-      .eq("id", titleId)
-      .eq("user_id", session.user.id)
+      .eq("id", title_id)
+      .eq("user_id", user.id)
       .single()
 
     if (titleError || !title) {
@@ -40,30 +50,45 @@ export async function POST(request: Request) {
 
     // Generate blog content using OpenAI
     const completion = await openai.chat.completions.create({
-      model: "gpt-4",
+      model: "gpt-3.5-turbo",
       messages: [
         {
           role: "system",
-          content:
-            "You are a helpful assistant that generates high-quality blog content. Generate a well-structured, engaging blog post based on the provided title. The content should be in markdown format with proper headings, paragraphs, and formatting. Include an introduction, 3-5 main sections with subheadings, and a conclusion.",
+          content: `You are a professional blog writer who creates well-structured, engaging content. 
+Format your posts using proper markdown:
+- Use # for the main title
+- Use ## for major sections
+- Use ### for subsections
+- Use **bold** for emphasis
+- Use bullet points and numbered lists where appropriate
+- Include a brief introduction after the title
+- Create 3-5 main sections with relevant subheadings
+- End with a conclusion section
+- Make sure sections are properly spaced with line breaks`,
         },
         {
           role: "user",
-          content: `Write a comprehensive blog post with the title: ${title.title_text}. The blog post should be about: ${title.topic}.`,
+          content: `Write a detailed blog post with the title: "${title.title_text}".
+Structure it with:
+1. An engaging introduction
+2. 3-5 main sections with clear headings
+3. Relevant subsections where needed
+4. A strong conclusion
+Use markdown formatting for all headings and emphasis.`,
         },
       ],
       temperature: 0.7,
     })
 
-    const content = completion.choices[0].message.content || ""
+    const generatedContent = completion.choices[0].message.content || ""
 
     // Create a new post in the database
     const { data: post, error: postError } = await supabase
       .from("posts")
       .insert({
-        user_id: session.user.id,
-        title_id: titleId,
-        content,
+        user_id: user.id,
+        title_id,
+        content: generatedContent,
         status: "draft",
       })
       .select()
@@ -75,12 +100,22 @@ export async function POST(request: Request) {
     }
 
     // Update the title to mark it as used
-    await supabase.from("titles").update({ is_used: true }).eq("id", titleId)
+    await supabase.from("titles").update({ is_used: true }).eq("id", title_id)
 
-    // Increment the user's posts_count
-    await supabase.rpc("increment_posts_count", {
-      user_id: session.user.id,
-    })
+    // Update user's post count
+    const { data: userData } = await supabase
+      .from("users")
+      .select("posts_count")
+      .eq("id", user.id)
+      .single()
+
+    await supabase
+      .from("users")
+      .update({ posts_count: (userData?.posts_count || 0) + 1 })
+      .eq("id", user.id)
+
+    // Clear all paginated cache for this user
+    await clearUserPostsCache(user.id)
 
     return NextResponse.json({ post })
   } catch (error) {

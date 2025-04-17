@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Loader2 } from "lucide-react"
 import { MarkdownRenderer } from "@/components/blog/markdown-renderer"
+import { DeleteBlogButton } from "@/components/blog/delete-blog-button"
 
 type Post = {
   id: string
@@ -80,7 +81,14 @@ export function BlogEditor({ post, userId }: { post: Post; userId: string }) {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">{post.titles.title_text}</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">{post.titles.title_text}</h1>
+        <DeleteBlogButton postId={post.id}>
+          <Button variant="destructive" size="sm">
+            Delete Blog
+          </Button>
+        </DeleteBlogButton>
+      </div>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "write" | "preview")}>
         <TabsList className="mb-4">

@@ -1,59 +1,76 @@
-import { NextResponse } from "next/server"
 import { createServerClient } from "@/lib/supabase-server"
+import { redis, CACHE_KEYS } from "@/lib/redis"
+
+// Helper function to clear all paginated cache
+async function clearUserPostsCache(userId: string) {
+  try {
+    // Get all keys matching the pattern
+    const keys = await redis.keys(`${CACHE_KEYS.USER_POSTS(userId)}*`)
+    if (keys.length > 0) {
+      // Delete all matching keys
+      await Promise.all(keys.map(key => redis.del(key)))
+    }
+  } catch (error) {
+    console.error("Error clearing cache:", error)
+  }
+}
 
 export async function POST(request: Request) {
   try {
     const supabase = createServerClient()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // Get user session
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    if (!user) {
+      return new Response("Unauthorized", { status: 401 })
     }
 
-    // Get request body
-    const { postId, content, status } = await request.json()
+    const { title_id, content, status = "draft" } = await request.json()
 
-    if (!postId) {
-      return NextResponse.json({ error: "Post ID is required" }, { status: 400 })
-    }
-
-    // Check if the post exists and belongs to the user
-    const { data: existingPost, error: checkError } = await supabase
+    const { data: post, error } = await supabase
       .from("posts")
-      .select("*")
-      .eq("id", postId)
-      .eq("user_id", session.user.id)
-      .single()
-
-    if (checkError || !existingPost) {
-      return NextResponse.json({ error: "Post not found or unauthorized" }, { status: 404 })
-    }
-
-    // Update the post
-    const updateData: any = {}
-    if (content !== undefined) updateData.content = content
-    if (status !== undefined) updateData.status = status
-
-    const { data: updatedPost, error: updateError } = await supabase
-      .from("posts")
-      .update(updateData)
-      .eq("id", postId)
+      .insert({
+        user_id: user.id,
+        title_id,
+        content,
+        status,
+      })
       .select()
       .single()
 
-    if (updateError) {
-      console.error("Error updating post:", updateError)
-      return NextResponse.json({ error: "Failed to update post" }, { status: 500 })
+    if (error) {
+      throw error
     }
 
-    return NextResponse.json({ post: updatedPost })
+    // Update title status
+    await supabase
+      .from("titles")
+      .update({ is_used: true })
+      .eq("id", title_id)
+
+    // Update user's post count
+    const { data: userData } = await supabase
+      .from("users")
+      .select("posts_count")
+      .eq("id", user.id)
+      .single()
+
+    await supabase
+      .from("users")
+      .update({ posts_count: (userData?.posts_count || 0) + 1 })
+      .eq("id", user.id)
+
+    // Clear all paginated cache for this user
+    await clearUserPostsCache(user.id)
+
+    return new Response(JSON.stringify(post), {
+      headers: { "Content-Type": "application/json" },
+    })
   } catch (error) {
     console.error("Error saving post:", error)
-    return NextResponse.json({ error: "Failed to save post" }, { status: 500 })
+    return new Response(JSON.stringify({ error: "Failed to save post" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    })
   }
 }
 

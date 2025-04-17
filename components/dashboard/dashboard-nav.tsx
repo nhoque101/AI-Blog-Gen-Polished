@@ -3,29 +3,28 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
-import { FileText, Home, Settings, PenSquare, PlusCircle } from "lucide-react"
+import { buttonVariants } from "@/components/ui/button"
 
-const navItems = [
+const links = [
   {
-    title: "Dashboard",
     href: "/dashboard",
-    icon: Home,
+    label: "Overview",
+    prefetch: true
   },
   {
-    title: "My Blogs",
     href: "/dashboard/blogs",
-    icon: FileText,
+    label: "My Blogs",
+    prefetch: true
   },
   {
-    title: "Create Blog",
     href: "/dashboard/create",
-    icon: PlusCircle,
+    label: "Create Blog",
+    prefetch: true
   },
   {
-    title: "Settings",
     href: "/dashboard/settings",
-    icon: Settings,
+    label: "Settings",
+    prefetch: true
   },
 ]
 
@@ -33,22 +32,22 @@ export function DashboardNav() {
   const pathname = usePathname()
 
   return (
-    <nav className="flex flex-col space-y-1">
-      {navItems.map((item) => (
-        <Button
-          key={item.href}
-          asChild
-          variant={pathname === item.href ? "secondary" : "ghost"}
+    <nav className="grid gap-2">
+      {links.map((link) => (
+        <Link
+          key={link.href}
+          href={link.href}
+          prefetch={link.prefetch}
           className={cn(
-            "w-full justify-start",
-            pathname === item.href && "bg-muted font-medium"
+            buttonVariants({ variant: "ghost" }),
+            pathname === link.href
+              ? "bg-muted hover:bg-muted"
+              : "hover:bg-transparent hover:underline",
+            "justify-start"
           )}
         >
-          <Link href={item.href}>
-            <item.icon className="mr-2 h-4 w-4" />
-            {item.title}
-          </Link>
-        </Button>
+          {link.label}
+        </Link>
       ))}
     </nav>
   )
