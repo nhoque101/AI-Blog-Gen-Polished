@@ -119,6 +119,8 @@ export function DeleteBlogButton({
         description: "Blog deleted successfully",
       })
 
+      // Redirect to blogs page and refresh
+      router.push("/dashboard/blogs")
       router.refresh()
     } catch (error) {
       toast({
